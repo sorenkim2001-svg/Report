@@ -561,6 +561,119 @@ body.light .rpt-sla-view-btn.active { color: #3730a3; box-shadow: 0 2px 8px rgba
 .rpt-sla-bc-row:hover td { background: rgba(99,102,241,.05); }
 body.light .rpt-sla-bc-row:hover td { background: rgba(99,102,241,.04); }
 
+/* ══════════════════════════════════════════════════════════════════
+   SLA Performance & Timelines — staged rail (Warehouse → Carrier →
+   Final Delivery) + Overall SLA summary. The stage tokens below are
+   the single source of truth for stage colour and are reused by the
+   table pills, so the whole card reads as one design system.
+   ══════════════════════════════════════════════════════════════════ */
+/* Stage tokens live on <body> so BOTH the timeline and the table pills
+   read them, and a light/dark toggle recolours everything with no
+   re-render — the old pills baked their hex at render time and went
+   stale the moment you flipped the theme. */
+body {
+  --sla-wh:   #a855f7; --sla-wh-tint:   rgba(168,85,247,.13);  /* warehouse — purple */
+  --sla-tpl:  #2dd4bf; --sla-tpl-tint:  rgba(45,212,191,.13);  /* carrier   — teal   */
+  --sla-ovr:  #4ade80; --sla-ovr-tint:  rgba(74,222,128,.13);  /* delivered — green  */
+  --sla-late: #f87171; --sla-late-tint: rgba(248,113,113,.15); /* beyond SLA — red   */
+}
+body.light {
+  --sla-wh:   #7e22ce; --sla-wh-tint:   rgba(126,34,206,.10);
+  --sla-tpl:  #0f766e; --sla-tpl-tint:  rgba(15,118,110,.10);
+  --sla-ovr:  #15803d; --sla-ovr-tint:  rgba(21,128,61,.10);
+  --sla-late: #b91c1c; --sla-late-tint: rgba(185,28,28,.10);
+}
+
+.rpt-slaTL {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 15px 20px 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.012));
+}
+body.light .rpt-slaTL { background: linear-gradient(180deg,#f8fafc,#f1f5f9); border-color: #e2e8f0; }
+
+.rpt-slaTL-hdr {
+  font-family: 'DM Mono', monospace; font-size: 9.5px; font-weight: 700;
+  letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--text-secondary); margin-bottom: 13px;
+}
+
+.rpt-slaTL-stages {
+  display: grid;
+  grid-template-columns: 1fr 26px 1fr 26px 1fr;
+  grid-template-rows: auto auto auto;
+  align-items: center;
+}
+.rpt-slaTL-stages > .c1 { grid-column: 1; }
+.rpt-slaTL-stages > .c2 { grid-column: 2; }
+.rpt-slaTL-stages > .c3 { grid-column: 3; }
+.rpt-slaTL-stages > .c4 { grid-column: 4; }
+.rpt-slaTL-stages > .c5 { grid-column: 5; }
+
+.rpt-slaTL-label {
+  grid-row: 1; text-align: center;
+  font-family: 'Raleway', sans-serif; font-size: 12.5px; font-weight: 700;
+  color: var(--text-secondary); padding-bottom: 9px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rpt-slaTL-track { grid-row: 2; display: flex; align-items: center; }
+.rpt-slaTL-rail {
+  flex: 1 1 auto; height: 7px; min-width: 6px; border-radius: 99px;
+  background: var(--c);
+  box-shadow: 0 1px 7px -2px var(--c);
+  transition: background .25s ease;
+}
+.rpt-slaTL-node {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--c); color: #fff;
+  font-size: 15px; font-weight: 900; line-height: 1;
+  box-shadow: 0 3px 12px -3px var(--c), inset 0 0 0 3px rgba(255,255,255,.14);
+  transition: background .25s ease, transform .2s ease;
+}
+.rpt-slaTL-track.is-empty .rpt-slaTL-rail,
+.rpt-slaTL-track.is-empty .rpt-slaTL-node { background: var(--border-bright, rgba(255,255,255,.14)); box-shadow: none; }
+.rpt-slaTL-arrow {
+  grid-row: 2; text-align: center; font-size: 13px; line-height: 1;
+  color: var(--text-secondary); opacity: .45;
+}
+.rpt-slaTL-val {
+  grid-row: 3; text-align: center; padding-top: 9px;
+  font-family: 'Raleway', sans-serif; font-size: 15.5px; font-weight: 900;
+  letter-spacing: -.3px; color: var(--text-primary);
+}
+
+.rpt-slaTL-overall {
+  margin-top: 14px; border-radius: 14px; padding: 10px 14px; text-align: center;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.035);
+}
+body.light .rpt-slaTL-overall { background: #fff; border-color: #e2e8f0; }
+.rpt-slaTL-overall-label {
+  font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 700;
+  letter-spacing: 1.1px; text-transform: uppercase; color: var(--text-secondary);
+}
+.rpt-slaTL-overall-val {
+  font-family: 'Raleway', sans-serif; font-size: 19px; font-weight: 900;
+  letter-spacing: -.4px; color: var(--text-primary); line-height: 1.25; margin-top: 2px;
+}
+.rpt-slaTL-overall-sub {
+  font-family: 'DM Mono', monospace; font-size: 10px; color: var(--text-secondary); margin-top: 3px;
+}
+
+/* Table pills inherit the same stage palette as the timeline above.
+   --c (line colour) and --bg (tint) are set inline per cell. */
+.rpt-slaP {
+  display: inline-flex; align-items: center; gap: 7px;
+  border-radius: 99px; border: 1px solid var(--c);
+  background: var(--bg, transparent);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.rpt-slaP-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); flex: 0 0 auto; }
+.rpt-slaP-txt { font-family: 'DM Mono', monospace; font-weight: 800; letter-spacing: .3px; color: var(--c); }
+#rpt-sla-tbody td[data-rpt-key]:hover .rpt-slaP { transform: translateY(-1px); box-shadow: 0 3px 10px -3px var(--c); }
+#rpt-sla-tbody td[data-rpt-key] { cursor: pointer; }
+
 .rpt-card-body { padding: 18px 20px; }
 
 /* ── Platform Bars ── */
@@ -1226,11 +1339,14 @@ body.light #rpt-sla-tbody span[style*="border-radius: 99px"] {
 body.light #rpt-sla-tbody span[style*="font-size:12.5px"] {
   filter: brightness(0.72) saturate(1.4);
 }
+/* …but never dim the new stage pills — their colours are already
+   light-mode tuned, and double-darkening made them unreadable. */
+body.light #rpt-sla-tbody span.rpt-slaP-txt { filter: none !important; }
 
-/* ── SLA summary box values — keep colored, just ensure visibility ── */
-body.light #rpt-sla-fulfil-rate { color: #4338ca !important; }
-body.light #rpt-sla-3pl-rate    { color: #0e7490 !important; }
-body.light #rpt-sla-score       { color: #047857 !important; }
+/* ── Timeline stage values — plain primary text, colour lives in the rail ── */
+body.light #rpt-sla-fulfil-rate,
+body.light #rpt-sla-3pl-rate,
+body.light #rpt-sla-score { color: #0f172a !important; }
 
 /* ── SLA card channel labels ── */
 body.light #rpt-sla-tbody td span[style*="font-weight:700"] {
@@ -1956,7 +2072,7 @@ body.light .rpt-order-card-hdr { border-bottom-color: #e2e8f0; }
     <!-- SLA Performance Card -->
       <div class="rpt-card">
         <div class="rpt-card-hdr">
-          <div class="rpt-card-title">⚡ SLA Performance</div>
+          <div class="rpt-card-title">⚡ SLA Performance &amp; Timelines</div>
           <div style="display:flex;align-items:center;gap:10px;">
             <div class="rpt-sla-view-toggle" id="rpt-sla-view-toggle">
               <button type="button" class="rpt-sla-view-btn active" data-mode="channel" onclick="rptSetSlaViewMode('channel')">🏪 Channel/Brand</button>
@@ -2016,24 +2132,45 @@ body.light .rpt-order-card-hdr { border-bottom-color: #e2e8f0; }
               </tfoot>
             </table>
           </div>
-          <div id="rpt-sla-summary-boxes" style="padding:14px 20px 18px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
-            <div style="border-radius:16px;padding:12px 14px;background:linear-gradient(135deg,rgba(99,102,241,.14),rgba(99,102,241,.05));border:1px solid rgba(99,102,241,.28);text-align:center;position:relative;overflow:hidden;box-shadow:0 4px 14px rgba(99,102,241,.12);">
-              <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#6366f1,#818cf8);border-radius:99px;"></div>
-              <div style="font-size:15px;margin-bottom:5px;">🏭</div>
-              <div style="font-family:'Raleway',sans-serif;font-size:18px;font-weight:900;color:#818cf8;letter-spacing:-.3px;line-height:1;" id="rpt-sla-fulfil-rate">—</div>
-              <div style="font-family:'DM Mono',monospace;font-size:8px;text-transform:uppercase;letter-spacing:1px;color:var(--text-secondary);margin-top:4px;">Warehouse</div>
-            </div>
-            <div style="border-radius:16px;padding:12px 14px;background:linear-gradient(135deg,rgba(6,182,212,.14),rgba(6,182,212,.05));border:1px solid rgba(6,182,212,.28);text-align:center;position:relative;overflow:hidden;box-shadow:0 4px 14px rgba(6,182,212,.12);">
-              <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#0891b2,#22d3ee);border-radius:99px;"></div>
-              <div style="font-size:15px;margin-bottom:5px;">🚚</div>
-              <div style="font-family:'Raleway',sans-serif;font-size:18px;font-weight:900;color:#22d3ee;letter-spacing:-.3px;line-height:1;" id="rpt-sla-3pl-rate">—</div>
-              <div style="font-family:'DM Mono',monospace;font-size:8px;text-transform:uppercase;letter-spacing:1px;color:var(--text-secondary);margin-top:4px;">3PL Carrier</div>
-            </div>
-            <div style="border-radius:16px;padding:12px 14px;background:linear-gradient(135deg,rgba(16,185,129,.14),rgba(16,185,129,.05));border:1px solid rgba(16,185,129,.28);text-align:center;position:relative;overflow:hidden;box-shadow:0 4px 14px rgba(16,185,129,.12);">
-              <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#059669,#34d399);border-radius:99px;"></div>
-              <div style="font-size:15px;margin-bottom:5px;">📦</div>
-              <div style="font-family:'Raleway',sans-serif;font-size:18px;font-weight:900;color:#34d399;letter-spacing:-.3px;line-height:1;" id="rpt-sla-score">—</div>
-              <div style="font-family:'DM Mono',monospace;font-size:8px;text-transform:uppercase;letter-spacing:1px;color:var(--text-secondary);margin-top:4px;">Overall SLA</div>
+          <div id="rpt-sla-summary-boxes" style="padding:14px 20px 18px;">
+            <div class="rpt-slaTL">
+              <div class="rpt-slaTL-hdr">SLA Performance &amp; Timelines</div>
+              <div class="rpt-slaTL-stages">
+
+                <div class="rpt-slaTL-label c1">Warehouse</div>
+                <div class="rpt-slaTL-track c1" id="rpt-sla-tl-wh" style="--c:var(--sla-wh);">
+                  <span class="rpt-slaTL-rail"></span>
+                  <span class="rpt-slaTL-node">✓</span>
+                  <span class="rpt-slaTL-rail"></span>
+                </div>
+                <div class="rpt-slaTL-val c1" id="rpt-sla-fulfil-rate">—</div>
+
+                <div class="rpt-slaTL-arrow c2">→</div>
+
+                <div class="rpt-slaTL-label c3">Carrier</div>
+                <div class="rpt-slaTL-track c3" id="rpt-sla-tl-tpl" style="--c:var(--sla-tpl);">
+                  <span class="rpt-slaTL-rail"></span>
+                  <span class="rpt-slaTL-node">✓</span>
+                  <span class="rpt-slaTL-rail"></span>
+                </div>
+                <div class="rpt-slaTL-val c3" id="rpt-sla-3pl-rate">—</div>
+
+                <div class="rpt-slaTL-arrow c4">→</div>
+
+                <div class="rpt-slaTL-label c5">Final Delivery</div>
+                <div class="rpt-slaTL-track c5" id="rpt-sla-tl-ovr" style="--c:var(--sla-ovr);">
+                  <span class="rpt-slaTL-rail"></span>
+                  <span class="rpt-slaTL-node">✓</span>
+                  <span class="rpt-slaTL-rail"></span>
+                </div>
+                <div class="rpt-slaTL-val c5" id="rpt-sla-score">—</div>
+
+              </div>
+              <div class="rpt-slaTL-overall">
+                <div class="rpt-slaTL-overall-label">Overall SLA</div>
+                <div class="rpt-slaTL-overall-val" id="rpt-sla-overall-val">—</div>
+                <div class="rpt-slaTL-overall-sub" id="rpt-sla-overall-sub">—</div>
+              </div>
             </div>
           </div>
         </div>
@@ -2831,46 +2968,57 @@ try {
 }
 window._rptSlaOrderIndex = {}; // rebuilt fresh below as each SLA cell is drawn
 
+// Stage palette — maps a column to the same CSS token the timeline rails
+// use, so a pill in the table and its stage on the timeline always agree
+// and both follow the light/dark toggle without re-rendering.
+var SLA_STAGE_VAR = { wh: 'wh', '3pl': 'tpl', ovr: 'ovr' };
+
+// One pass over a metric instead of three (rptAvgH + threshold reduce +
+// pass tally each walked the same arrays). Result is memoised on the
+// metric object, so a cell re-rendered by a theme/view toggle is free.
+function _slaStats(metric) {
+  if (!metric || !metric.total) return null;
+  if (metric._st) return metric._st;
+  var hrs = metric.hrs || [], sum = 0;
+  for (var i = 0; i < hrs.length; i++) sum += hrs[i];
+  var avgH = hrs.length ? sum / hrs.length : null;
+
+  // Within SLA vs beyond SLA — compares the AVERAGE time in the pill
+  // against the AVERAGE of that cell's own order thresholds (24h flat for
+  // WH; region-based hours for 3PL/Overall, blended fairly when a cell
+  // mixes regions). Ties the colour to the number actually on screen
+  // instead of what fraction of orders individually passed.
+  var orders = metric.orders || [], thrSum = 0, thrN = 0;
+  for (var j = 0; j < orders.length; j++) {
+    if (orders[j].threshold != null) { thrSum += orders[j].threshold; thrN++; }
+  }
+  var avgThreshold = thrN ? thrSum / thrN : null;
+  var isBeyond = avgThreshold != null
+    ? avgH > avgThreshold
+    : ((metric.pass || 0) / metric.total) < 0.5; // fallback
+
+  metric._st = { sum: sum, n: hrs.length, avgH: avgH, avgThreshold: avgThreshold, isBeyond: isBeyond };
+  return metric._st;
+}
+
 function _slaCell(metric, colType, extraTdAttr, compact, extraStyle, forceBlackText, breakdownKey, breakdownTitle) {
   extraTdAttr = extraTdAttr || '';
   extraStyle = extraStyle || '';
-  var padV = compact ? '3px' : '10px';
+  var padV = compact ? '3px' : '9px';
   var fontSz = compact ? '11px' : '12.5px';
-  var pillPad = compact ? '3px 9px' : '6px 14px';
-  if (!metric || !metric.total) {
+  var pillPad = compact ? '3px 10px' : '6px 13px';
+  var st = _slaStats(metric);
+  if (!st) {
     return '<td ' + extraTdAttr + ' style="text-align:center;padding:' + padV + ' 6px;' + extraStyle + '">' +
       '<div style="display:flex;align-items:center;justify-content:center;height:100%;width:100%;">' +
-      '<span style="color:rgba(255,255,255,.15);font-family:\'DM Mono\',monospace;font-size:' + fontSz + ';">—</span>' +
+      '<span style="color:var(--text-secondary);opacity:.35;font-family:\'DM Mono\',monospace;font-size:' + fontSz + ';">—</span>' +
       '</div></td>';
   }
-  var avgH = rptAvgH(metric.hrs);
 
-  // Within SLA (green) vs beyond SLA (red) — compares the AVERAGE time in
-  // the pill against the AVERAGE of that cell's own order thresholds (24h
-  // flat for WH; region-based hours for 3PL/Overall, blended fairly when a
-  // cell mixes regions). This ties the color to the number actually on
-  // screen instead of what fraction of orders individually passed.
-  var avgThreshold = null;
-  if (metric.orders && metric.orders.length) {
-    var _thrSum = 0, _thrN = 0;
-    metric.orders.forEach(function(o) { if (o.threshold != null) { _thrSum += o.threshold; _thrN++; } });
-    if (_thrN) avgThreshold = _thrSum / _thrN;
-  }
-  var isBeyond = avgThreshold != null
-    ? avgH > avgThreshold
-    : metric.total > 0 && ((metric.pass || 0) / metric.total) < 0.5; // fallback
-
-  var timeColor, rowBg, borderColor;
-  if (forceBlackText) {
-    // Flat style — used by the Brandcom region-grouped SLA rows. Text
-    // color only, no pill background/border.
-    timeColor = isBeyond ? '#dc2626' : '#16a34a';
-    rowBg = 'transparent'; borderColor = 'transparent';
-  } else if (isBeyond) {
-    timeColor = '#dc2626'; rowBg = 'rgba(220,38,38,.10)'; borderColor = 'rgba(220,38,38,.3)';
-  } else {
-    timeColor = '#16a34a'; rowBg = 'transparent'; borderColor = 'transparent';
-  }
+  // Stage colour when the cell is within SLA, red when it is beyond it.
+  var tok = st.isBeyond ? 'late' : (SLA_STAGE_VAR[colType] || 'ovr');
+  var c    = 'var(--sla-' + tok + ')';
+  var tint = 'var(--sla-' + tok + '-tint)';
 
   // Clickable breakdown — reuses the same [data-rpt-key] click system as the
   // status table, prefixed "sla:" so the dispatcher routes it to the SLA
@@ -2879,24 +3027,38 @@ function _slaCell(metric, colType, extraTdAttr, compact, extraStyle, forceBlackT
     ? ' data-rpt-key="sla:' + encodeURIComponent(breakdownKey) + '" data-rpt-title="' + encodeURIComponent(breakdownTitle || '') + '"'
     : '';
 
-  // Light mode adjustments via a data attribute trick — inline style handles both
-  var boxShadow = rowBg === 'transparent' ? 'none' : '0 1px 4px rgba(0,0,0,.08)';
+  // Brandcom region rows stay flat (bare coloured text, no pill) so four
+  // stacked rows per brand don't turn into a wall of chips.
+  var pillStyle = forceBlackText
+    ? '--c:' + c + ';--bg:transparent;border-color:transparent;padding:' + pillPad + ';'
+    : '--c:' + c + ';--bg:' + tint + ';padding:' + pillPad + ';';
+
   return '<td ' + extraTdAttr + keyAttr + ' style="text-align:center;padding:' + padV + ' 6px;' + extraStyle + '">' +
     '<div style="display:flex;align-items:center;justify-content:center;height:100%;width:100%;">' +
-    '<div style="display:inline-flex;align-items:center;justify-content:center;' +
-      'background:' + rowBg + ';border:1px solid ' + borderColor + ';' +
-      'border-radius:10px;padding:' + pillPad + ';box-shadow:' + boxShadow + ';">' +
-      '<span style="font-family:\'DM Mono\',monospace;font-size:' + fontSz + ';font-weight:800;color:' + timeColor + ';letter-spacing:.3px;">' +
-        rptFmtH(avgH) +
-      '</span>' +
-    '</div>' +
+    '<span class="rpt-slaP" style="' + pillStyle + '">' +
+      (forceBlackText ? '' : '<span class="rpt-slaP-dot"></span>') +
+      '<span class="rpt-slaP-txt" style="font-size:' + fontSz + ';">' + rptFmtH(st.avgH) + '</span>' +
+    '</span>' +
     '</div>' +
   '</td>';
 }
 
-var totWH  = { hrs: [], pass: 0, total: 0 };
-var tot3PL = { hrs: [], pass: 0, total: 0 };
-var totOVR = { hrs: [], pass: 0, total: 0 };
+// Running totals as sum/count instead of a growing hours array. The old
+// version did `tot.hrs = tot.hrs.concat(metric.hrs)` once per row, which
+// reallocated and copied the whole accumulated array every time — O(n²)
+// over the number of orders in view, and the single biggest cost of a
+// re-render on a wide date range.
+var totWH  = { sum: 0, n: 0, pass: 0, total: 0 };
+var tot3PL = { sum: 0, n: 0, pass: 0, total: 0 };
+var totOVR = { sum: 0, n: 0, pass: 0, total: 0 };
+function _slaAccAdd(acc, metric) {
+  if (!metric) return;
+  var st = _slaStats(metric);
+  if (st) { acc.sum += st.sum; acc.n += st.n; }
+  acc.pass  += metric.pass  || 0;
+  acc.total += metric.total || 0;
+}
+function _slaAccAvg(acc) { return acc.n ? acc.sum / acc.n : null; }
 
 var REGION_GROUPS = [
   { label: 'NCR', regions: ['Metro Manila'] },
@@ -2904,16 +3066,26 @@ var REGION_GROUPS = [
   { label: 'VIS', regions: ['Visayas'] },
   { label: 'MIN', regions: ['Mindanao'] }
 ];
+// Single-region groups (the common case — NCR/LUZ/VIS/MIN each map to
+// exactly one region) now return the source metric directly instead of
+// rebuilding clone arrays, and multi-region groups push in place rather
+// than reallocating with concat on every region.
 function _rptMergeRegionMetrics(byRegion, regions) {
   if (!byRegion) return null;
-  var hrs = [], total = 0, orders = [];
-  regions.forEach(function(r) {
-    var m = byRegion[r];
-    if (m) { hrs = hrs.concat(m.hrs); total += m.total; orders = orders.concat(m.orders || []); }
-  });
+  if (regions.length === 1) {
+    var only = byRegion[regions[0]];
+    return (only && only.total) ? only : null;
+  }
+  var hrs = [], total = 0, orders = [], pass = 0;
+  for (var i = 0; i < regions.length; i++) {
+    var m = byRegion[regions[i]];
+    if (!m) continue;
+    total += m.total;
+    for (var h = 0; h < m.hrs.length; h++) hrs.push(m.hrs[h]);
+    var mo = m.orders || [];
+    for (var o = 0; o < mo.length; o++) { orders.push(mo[o]); if (mo[o].pass) pass++; }
+  }
   if (!total) return null;
-  var pass = 0;
-  orders.forEach(function(o) { if (o.pass) pass++; });
   return { hrs: hrs, total: total, orders: orders, pass: pass };
 }
 
@@ -2970,9 +3142,9 @@ if (slaBody) {
     } else {
       slaBody.innerHTML = carrierKeys.map(function(carrier, idx) {
         var sla = channelSLA[carrier];
-        totWH.hrs  = totWH.hrs.concat(sla.wh.hrs);   totWH.pass  += sla.wh.pass;  totWH.total  += sla.wh.total;
-        tot3PL.hrs = tot3PL.hrs.concat(sla.tpl.hrs); tot3PL.pass += sla.tpl.pass; tot3PL.total += sla.tpl.total;
-        totOVR.hrs = totOVR.hrs.concat(sla.ovr.hrs); totOVR.pass += sla.ovr.pass; totOVR.total += sla.ovr.total;
+        _slaAccAdd(totWH,  sla.wh);
+        _slaAccAdd(tot3PL, sla.tpl);
+        _slaAccAdd(totOVR, sla.ovr);
         window._rptSlaOrderIndex[carrier + '|wh']  = sla.wh.orders  || [];
         window._rptSlaOrderIndex[carrier + '|tpl'] = sla.tpl.orders || [];
         window._rptSlaOrderIndex[carrier + '|ovr'] = sla.ovr.orders || [];
@@ -2998,12 +3170,9 @@ if (slaBody) {
     slaBody.innerHTML = PLAT_ROWS.map(function(plat, platIdx) {
       var sla = channelSLA[plat.key];
       if (sla) {
-        totWH.hrs  = totWH.hrs.concat(sla.wh.hrs);
-        totWH.pass  += sla.wh.pass;  totWH.total  += sla.wh.total;
-        tot3PL.hrs = tot3PL.hrs.concat(sla.tpl.hrs);
-        tot3PL.pass += sla.tpl.pass; tot3PL.total += sla.tpl.total;
-        totOVR.hrs = totOVR.hrs.concat(sla.ovr.hrs);
-        totOVR.pass += sla.ovr.pass; totOVR.total += sla.ovr.total;
+        _slaAccAdd(totWH,  sla.wh);
+        _slaAccAdd(tot3PL, sla.tpl);
+        _slaAccAdd(totOVR, sla.ovr);
         window._rptSlaOrderIndex[plat.key + '|wh'] = sla.wh.orders || [];
       }
       var color = PLAT_COLORS[PLAT_ROWS.indexOf(plat) % PLAT_COLORS.length];
@@ -3031,12 +3200,9 @@ if (slaBody) {
     slaBody.innerHTML = PLAT_ROWS.map(function(plat) {
       var sla = channelSLA[plat.key];
       if (sla) {
-        totWH.hrs  = totWH.hrs.concat(sla.wh.hrs);
-        totWH.pass  += sla.wh.pass;  totWH.total  += sla.wh.total;
-        tot3PL.hrs = tot3PL.hrs.concat(sla.tpl.hrs);
-        tot3PL.pass += sla.tpl.pass; tot3PL.total += sla.tpl.total;
-        totOVR.hrs = totOVR.hrs.concat(sla.ovr.hrs);
-        totOVR.pass += sla.ovr.pass; totOVR.total += sla.ovr.total;
+        _slaAccAdd(totWH,  sla.wh);
+        _slaAccAdd(tot3PL, sla.tpl);
+        _slaAccAdd(totOVR, sla.ovr);
         window._rptSlaOrderIndex[plat.key + '|wh']  = sla.wh.orders  || [];
         window._rptSlaOrderIndex[plat.key + '|tpl'] = sla.tpl.orders || [];
         window._rptSlaOrderIndex[plat.key + '|ovr'] = sla.ovr.orders || [];
@@ -3062,13 +3228,35 @@ var slaTfoot = document.querySelector('#rpt-sla-tbody')
   : null;
 if (slaTfoot) slaTfoot.style.display = 'none';
 
-// Hide the WH/3PL/Overall summary boxes on Brandcom only (region breakdown replaces them there)
+// Hide the timeline on Brandcom only (region breakdown replaces it there)
 var slaSummaryBoxes = document.getElementById('rpt-sla-summary-boxes');
-if (slaSummaryBoxes) slaSummaryBoxes.style.display = (_rptMainActiveTab === 'brandcom' && _rptSlaViewMode === 'channel') ? 'none' : 'grid';
+if (slaSummaryBoxes) slaSummaryBoxes.style.display = (_rptMainActiveTab === 'brandcom' && _rptSlaViewMode === 'channel') ? 'none' : 'block';
 
-_rptSet('rpt-sla-fulfil-rate', rptFmtH(rptAvgH(totWH.hrs)));
-_rptSet('rpt-sla-3pl-rate',    rptFmtH(rptAvgH(tot3PL.hrs)));
-_rptSet('rpt-sla-score',       rptFmtH(rptAvgH(totOVR.hrs)));
+// ── Timeline stages: Warehouse → Carrier → Final Delivery ──
+// A stage that beat its blended SLA target keeps its stage colour and a
+// ✓; one that ran past it turns red and swaps to ! so the rail itself
+// carries the verdict, not just the number underneath it.
+function _rptPaintSlaStage(trackId, acc, stageVar) {
+  var el = document.getElementById(trackId);
+  if (!el) return;
+  var node = el.querySelector('.rpt-slaTL-node');
+  var late = acc.total > 0 && (acc.pass / acc.total) < 0.5;
+  el.classList.toggle('is-empty', !acc.n);
+  el.style.setProperty('--c', !acc.n ? 'var(--border-bright)' : (late ? 'var(--sla-late)' : stageVar));
+  if (node) node.textContent = !acc.n ? '·' : (late ? '!' : '✓');
+}
+_rptPaintSlaStage('rpt-sla-tl-wh',  totWH,  'var(--sla-wh)');
+_rptPaintSlaStage('rpt-sla-tl-tpl', tot3PL, 'var(--sla-tpl)');
+_rptPaintSlaStage('rpt-sla-tl-ovr', totOVR, 'var(--sla-ovr)');
+
+_rptSet('rpt-sla-fulfil-rate', rptFmtH(_slaAccAvg(totWH)));
+_rptSet('rpt-sla-3pl-rate',    rptFmtH(_slaAccAvg(tot3PL)));
+_rptSet('rpt-sla-score',       rptFmtH(_slaAccAvg(totOVR)));
+_rptSet('rpt-sla-overall-val', rptFmtH(_slaAccAvg(totOVR)));
+_rptSet('rpt-sla-overall-sub',
+  totOVR.total
+    ? totOVR.total.toLocaleString() + ' orders · ' + Math.round((totOVR.pass / totOVR.total) * 100) + '% within SLA'
+    : 'No delivered orders in this range');
   _rptSet('rpt-sla-meta', D.periodLabel);
 
   // Insights — guarded against an empty platform list (e.g. a tab with no

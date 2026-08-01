@@ -18,7 +18,7 @@ function doGet(e) {
     try {
       var sheetName = e.parameter.sheet;
       var startRow  = e.parameter.startRow ? parseInt(e.parameter.startRow) : 2;
-      var batchSize = 2000; // was 500 — 4x fewer round trips per load
+      var batchSize = 5000; // bigger page = fewer round trips before an upload can diff
 
       var ss    = SpreadsheetApp.openById(DATA_SS_ID);
       var sheet = ss.getSheetByName(sheetName);
@@ -156,18 +156,54 @@ function doPost(e) {
       // wipes rows it isn't touching.
       if (payload.clear) {
         sheet.clearContents();
-        SpreadsheetApp.flush();
       }
 
       if (payload.csv && payload.csv.length > 0) {
         var rows = Utilities.parseCsv(payload.csv);
         if (rows.length > 0) {
           var startRow = payload.startRow || (sheet.getLastRow() + 1);
-          var numCols  = rows[0].length;
+
+          // parseCsv returns RAGGED rows — a line with fewer trailing commas
+          // yields a shorter array, and setValues() throws on a jagged
+          // matrix. Pad every row out to the widest one first.
+          var numCols = 0;
+          for (var r = 0; r < rows.length; r++) {
+            if (rows[r].length > numCols) numCols = rows[r].length;
+          }
+          for (var r2 = 0; r2 < rows.length; r2++) {
+            var row = rows[r2];
+            for (var c = row.length; c < numCols; c++) row[c] = '';
+          }
+
+          // Grow the sheet to fit before writing. A new sheet is 1000x26,
+          // so an append past row 1000 (or a report wider than 26 columns)
+          // used to fail outright with "coordinates or dimensions of the
+          // range are invalid" — which is exactly what an append does.
+          //
+          // Chunks arrive ~10 at a time, so the grow (and only the grow) is
+          // taken under a lock; the setValues below stays parallel because
+          // every chunk owns a disjoint row range.
+          var needRows = startRow + rows.length - 1;
+          if (needRows > sheet.getMaxRows() || numCols > sheet.getMaxColumns()) {
+            var lock = LockService.getScriptLock();
+            try {
+              lock.waitLock(30000);
+              var maxRows = sheet.getMaxRows();
+              if (needRows > maxRows) sheet.insertRowsAfter(maxRows, needRows - maxRows);
+              var maxCols = sheet.getMaxColumns();
+              if (numCols > maxCols) sheet.insertColumnsAfter(maxCols, numCols - maxCols);
+              SpreadsheetApp.flush();
+            } finally {
+              try { lock.releaseLock(); } catch (le) {}
+            }
+          }
+
           sheet.getRange(startRow, 1, rows.length, numCols).setValues(rows);
         }
       }
 
+      // One flush at the end instead of two — a flush is a full round trip
+      // to the Sheets backend and the intermediate one bought nothing.
       SpreadsheetApp.flush();
       return ContentService.createTextOutput(JSON.stringify({ ok: true }))
         .setMimeType(ContentService.MimeType.JSON);
@@ -233,7 +269,7 @@ function getSharedCache() {
 function getSheetDataBatch(sheetName, startRow) {
   try {
     startRow = startRow || 2;
-    var batchSize = 2000; // was 500 — 4x fewer round trips per load
+    var batchSize = 5000; // bigger page = fewer round trips before an upload can diff
     var ss    = SpreadsheetApp.openById(DATA_SS_ID);
     var sheet = ss.getSheetByName(sheetName);
 

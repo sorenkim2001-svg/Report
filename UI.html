@@ -217,50 +217,106 @@
     return new TextDecoder().decode(buf);
   }
 
-  async function fsWrite(pfx, rows, onProgress) {
+  // ── Row-bucketed Firestore sync ────────────────────────────────────
+  // Chunks are now cut on fixed ROW boundaries and each bucket is
+  // compressed independently, which is what makes an incremental upload
+  // possible: only the buckets that actually contain new/changed rows get
+  // serialized, compressed and written. The old scheme compressed the
+  // entire dataset into one blob and sliced it by character offset, so a
+  // single edited row shifted every boundary and forced a full rewrite of
+  // every chunk — on every upload, forever.
+  //
+  // opts.changedIdx is the same 0-based list the merge step already
+  // produces; opts.baseRows is how many rows were already stored before the
+  // merge. Omit either to force a full rewrite.
+  var FS_ROWS_PER_CHUNK = 20000;
+
+  function _fsSerializeRows(rows, from, to) {
+    // JSON.stringify with a replacer instead of building a parallel copy
+    // of the whole dataset first — same output, roughly half the peak
+    // memory and no multi-hundred-MB intermediate array to garbage collect.
+    var slice = rows.slice(from, to);
+    return JSON.stringify(slice, function (k, v) {
+      var raw = this[k];
+      return raw instanceof Date ? { __d: raw.toISOString() } : (raw == null ? '' : v);
+    });
+  }
+
+  async function fsWrite(pfx, rows, onProgress, opts) {
     if (!_fbDb) throw new Error('Firestore not ready');
-    var serialized = new Array(rows.length);
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i], out = new Array(r.length);
-      for (var j = 0; j < r.length; j++) {
-        var c = r[j];
-        out[j] = c instanceof Date ? { __d: c.toISOString() } : (c == null ? '' : c);
+    opts = opts || {};
+    var changedIdx = opts.changedIdx;
+
+    var isOrder    = pfx.indexOf('order') >= 0;
+    var countField = isOrder ? 'orderChunks' : 'statusChunks';
+    var modeField  = isOrder ? 'orderMode'   : 'statusMode';
+    var sizeField  = isOrder ? 'orderChunkBytes' : 'statusChunkBytes';
+
+    var oldMetaSnap = await _fbDb.collection(FS_COL).doc(FS_META).get().catch(function(){ return null; });
+    var oldMeta     = (oldMetaSnap && oldMetaSnap.exists) ? oldMetaSnap.data() : {};
+    var oldCount    = oldMeta[countField] || 0;
+    var oldSizes    = Array.isArray(oldMeta[sizeField]) ? oldMeta[sizeField].slice() : [];
+
+    var nChunks = Math.max(1, Math.ceil(rows.length / FS_ROWS_PER_CHUNK));
+
+    // Full rewrite when we can't prove the stored buckets line up with the
+    // rows this client is holding: legacy single-blob format (its chunk
+    // boundaries mean nothing here), or a stored chunk count that doesn't
+    // match the dataset we diffed against — which would mean our indices
+    // point at the wrong buckets and an incremental write would corrupt.
+    var expectedOld = (opts.baseRows != null) ? Math.max(1, Math.ceil(opts.baseRows / FS_ROWS_PER_CHUNK)) : -1;
+    var forceFull = !changedIdx
+      || oldMeta[modeField] !== 'rows'
+      || oldCount === 0
+      || oldCount !== expectedOld;
+
+    var dirty = {};
+    if (forceFull) {
+      for (var d = 0; d < nChunks; d++) dirty[d] = true;
+    } else {
+      for (var ci = 0; ci < changedIdx.length; ci++) {
+        dirty[Math.floor(changedIdx[ci] / FS_ROWS_PER_CHUNK)] = true;
       }
-      serialized[i] = out;
+      // The old tail bucket was partially filled; appending past it changes
+      // its contents even when no index inside it was flagged.
+      if (oldCount > 0) dirty[oldCount - 1] = true;
+      for (var nb = oldCount; nb < nChunks; nb++) dirty[nb] = true;
     }
 
-    var field = pfx.indexOf('order') >= 0 ? 'orderChunks' : 'statusChunks';
-
-    // Old-chunk lookup now runs WHILE compression happens instead of after
-    // it — they don't depend on each other, so overlapping them removes a
-    // full round-trip from the critical path before any write can start.
-    var oldMetaPromise = _fbDb.collection(FS_COL).doc(FS_META).get().catch(function(){ return null; });
-    var cmpPromise = fastCompress(JSON.stringify(serialized));
-
-    var oldMeta = await oldMetaPromise;
-    if (oldMeta && oldMeta.exists) {
-      var oldCount = oldMeta.data()[field] || 0;
-      if (oldCount > 0) {
-        Promise.all(Array.from({ length: oldCount }, function(_, i){ return _fbDb.collection(FS_COL).doc(pfx + i).delete().catch(function(){}); }));
-      }
-    }
-
-    var cmp = await cmpPromise;
-    var chunks = [];
-    for (var k = 0; k < cmp.length; k += FS_CHUNK_SIZE) chunks.push({ idx: chunks.length, data: cmp.substring(k, k + FS_CHUNK_SIZE) });
-    if (!chunks.length) chunks.push({ idx: 0, data: '' });
+    var dirtyList = Object.keys(dirty).map(Number).filter(function (i) { return i < nChunks; }).sort(function (a, b) { return a - b; });
+    var sizes = new Array(nChunks);
+    for (var s0 = 0; s0 < nChunks; s0++) sizes[s0] = oldSizes[s0] || 0;
 
     var done = 0;
-    for (var s = 0; s < chunks.length; s += FS_UPLOAD_CONCURRENCY) {
-      var batch = chunks.slice(s, s + FS_UPLOAD_CONCURRENCY);
-      await Promise.all(batch.map(function(chunk) {
-        return _fbDb.collection(FS_COL).doc(pfx + chunk.idx).set({ data: chunk.data, idx: chunk.idx, ts: Date.now() }).then(function(){
-          done++;
-          if (onProgress) onProgress(Math.round((done / chunks.length) * 100));
-        });
+    var totalSteps = dirtyList.length || 1;
+    for (var s = 0; s < dirtyList.length; s += FS_UPLOAD_CONCURRENCY) {
+      var batch = dirtyList.slice(s, s + FS_UPLOAD_CONCURRENCY);
+      await Promise.all(batch.map(async function (idx) {
+        var cmp = await fastCompress(_fsSerializeRows(rows, idx * FS_ROWS_PER_CHUNK, (idx + 1) * FS_ROWS_PER_CHUNK));
+        sizes[idx] = cmp.length;
+        await _fbDb.collection(FS_COL).doc(pfx + idx).set({ data: cmp, idx: idx, ts: Date.now() });
+        done++;
+        if (onProgress) onProgress(Math.round((done / totalSteps) * 100));
       }));
     }
-    return { count: chunks.length, bytes: cmp.length };
+
+    // Surplus buckets only — and awaited AFTER the writes land. The old
+    // code fired deletes for indices 0..oldCount-1 without awaiting them
+    // while concurrently re-creating those same documents, so a slow
+    // delete could land on top of a freshly written chunk and silently
+    // shred the dataset.
+    if (oldCount > nChunks) {
+      var surplus = [];
+      for (var k = nChunks; k < oldCount; k++) surplus.push(k);
+      await Promise.all(surplus.map(function (k) {
+        return _fbDb.collection(FS_COL).doc(pfx + k).delete().catch(function () {});
+      }));
+    }
+
+    var totalBytes = 0;
+    for (var b = 0; b < sizes.length; b++) totalBytes += sizes[b];
+    if (onProgress) onProgress(100);
+    return { count: nChunks, bytes: totalBytes, sizes: sizes, mode: 'rows', written: dirtyList.length };
   }
 
   async function fsGetMeta() {
@@ -283,21 +339,40 @@
       var allDocIds = orderDocIds.concat(statusDocIds);
       var allDocs = await Promise.all(allDocIds.map(function(id){ return _fbDb.collection(FS_COL).doc(id).get(); }));
 
+      // Two storage layouts to read:
+      //  • 'rows'  — each doc is an independently compressed bucket of rows,
+      //              so they decompress in PARALLEL and just concatenate.
+      //  • legacy  — one blob sliced by character offset, so every doc has
+      //              to be re-joined before a single sequential decompress.
+      function _reviveRows(raw, into) {
+        for (var i = 0; i < raw.length; i++) {
+          var r = raw[i];
+          for (var j = 0; j < r.length; j++) {
+            var c = r[j];
+            if (c && typeof c === 'object' && c.__d) r[j] = new Date(c.__d);
+          }
+          into.push(r);
+        }
+      }
+      async function _readSet(docs, isRowMode) {
+        var out = [];
+        if (!docs.length) return out;
+        if (isRowMode) {
+          var parts = await Promise.all(docs.map(async function (s) {
+            var d = (s.data() && s.data().data) || '';
+            return d ? JSON.parse(await fastDecompress(d)) : [];
+          }));
+          for (var p = 0; p < parts.length; p++) _reviveRows(parts[p], out);
+          return out;
+        }
+        var joined = docs.map(function (s) { return (s.data() && s.data().data) || ''; }).join('');
+        if (joined) _reviveRows(JSON.parse(await fastDecompress(joined)), out);
+        return out;
+      }
+
       var orderRows = [], statusRows = [];
-      if (orderChunks > 0) {
-        var cmpO = allDocs.slice(0, orderChunks).map(function(s){ return (s.data() && s.data().data) || ''; }).join('');
-        if (cmpO) {
-          var rawO = JSON.parse(await fastDecompress(cmpO));
-          orderRows = rawO.map(function(r){ return r.map(function(c){ return (c && typeof c === 'object' && c.__d) ? new Date(c.__d) : c; }); });
-        }
-      }
-      if (statusChunks > 0) {
-        var cmpS = allDocs.slice(orderChunks).map(function(s){ return (s.data() && s.data().data) || ''; }).join('');
-        if (cmpS) {
-          var rawS = JSON.parse(await fastDecompress(cmpS));
-          statusRows = rawS.map(function(r){ return r.map(function(c){ return (c && typeof c === 'object' && c.__d) ? new Date(c.__d) : c; }); });
-        }
-      }
+      if (orderChunks > 0)  orderRows  = await _readSet(allDocs.slice(0, orderChunks), meta.orderMode  === 'rows');
+      if (statusChunks > 0) statusRows = await _readSet(allDocs.slice(orderChunks),    meta.statusMode === 'rows');
 
       if (orderRows.length) window.lgrOrderData = (typeof _rptFixMultibrandRows === 'function') ? _rptFixMultibrandRows([[]].concat(orderRows)) : [[]].concat(orderRows);
       if (statusRows.length) window.lgrStatusData = [[]].concat(statusRows);
@@ -517,18 +592,23 @@
   }
 
   function rptToCsv(rows) {
-    var out = [];
+    var out = new Array(rows.length);
     for (var i = 0; i < rows.length; i++) {
-      var row = rows[i], cells = [];
-      for (var j = 0; j < row.length; j++) {
+      var row = rows[i], n = row.length, cells = new Array(n);
+      for (var j = 0; j < n; j++) {
         var v = row[j], s;
-        if (v instanceof Date) s = v.toISOString();
+        if (typeof v === 'string') s = v;                 // fast path — almost every cell
         else if (v === null || v === undefined) s = '';
-        else s = String(v).replace(/\r/g, '');
+        else if (v instanceof Date) s = v.toISOString();
+        else s = String(v);
+        // The old version ran a /\r/g replace on EVERY cell of every row —
+        // millions of pointless regex passes per upload. Only touch a cell
+        // that actually contains something needing escaping.
+        if (s.indexOf('\r') > -1) s = s.replace(/\r/g, '');
         if (s.indexOf(',') > -1 || s.indexOf('"') > -1 || s.indexOf('\n') > -1) s = '"' + s.replace(/"/g, '""') + '"';
-        cells.push(s);
+        cells[j] = s;
       }
-      out.push(cells.join(','));
+      out[i] = cells.join(',');
     }
     return out.join('\n');
   }
@@ -536,6 +616,7 @@
   // ── Row-level equality — treats a Date and its equivalent value as equal
   // so round-tripping through CSV/Sheets doesn't look like a "change" ──
   function _rptRowValsEqual(v1, v2) {
+    if (v1 === v2) return true; // fast path — Sheets round-trips give strings
     if (v1 instanceof Date || v2 instanceof Date) {
       var t1 = v1 instanceof Date ? v1.getTime() : new Date(v1).getTime();
       var t2 = v2 instanceof Date ? v2.getTime() : new Date(v2).getTime();
@@ -579,28 +660,37 @@
   // ROWS ONLY (no header). Returns { merged, changedIdx } — `merged` is the
   // full dataset, `changedIdx` are 0-based positions in `merged` that are
   // new or different from what was already stored.
+  // Map/Set instead of plain objects: no prototype-key hazard (an order
+  // number of "__proto__" or "constructor" silently corrupted the old
+  // dictionary), and materially faster lookups once the key count runs
+  // into the hundreds of thousands.
   function rptMergeOrderRows(existingData, newData) {
-    var map = {};     // order number -> row
-    var order = [];   // first-seen order, so output stays roughly stable
-    var changed = {}; // order number -> true, only for new/actually-different rows
-    for (var i = 0; i < existingData.length; i++) {
-      var erow = existingData[i];
-      var eon = (erow[3] || '').toString().trim();
+    var map = new Map();     // order number -> row
+    var order = [];          // first-seen order, so stored row positions stay stable
+    var changed = new Set(); // only new / actually-different orders
+    var i, erow, eon;
+    for (i = 0; i < existingData.length; i++) {
+      erow = existingData[i];
+      eon = (erow[3] || '').toString().trim();
       if (!eon) continue;
-      if (!map[eon]) order.push(eon);
-      map[eon] = erow;
+      if (!map.has(eon)) order.push(eon);
+      map.set(eon, erow);
     }
     for (var j = 0; j < newData.length; j++) {
       var nrow = newData[j];
       var non = (nrow[3] || '').toString().trim();
       if (!non) continue;
-      if (!map[non]) { order.push(non); changed[non] = true; }
-      else if (!_rptRowsEqual(map[non], nrow)) { changed[non] = true; }
-      map[non] = nrow; // whichever ingest runs LAST wins
+      var prev = map.get(non);
+      if (prev === undefined) { order.push(non); changed.add(non); }
+      else if (!_rptRowsEqual(prev, nrow)) { changed.add(non); }
+      map.set(non, nrow); // whichever ingest runs LAST wins
     }
-    var merged = order.map(function (on) { return map[on]; });
+    var merged = new Array(order.length);
     var changedIdx = [];
-    for (var k = 0; k < order.length; k++) if (changed[order[k]]) changedIdx.push(k);
+    for (var k = 0; k < order.length; k++) {
+      merged[k] = map.get(order[k]);
+      if (changed.has(order[k])) changedIdx.push(k);
+    }
     return { merged: merged, changedIdx: changedIdx };
   }
 
@@ -608,7 +698,7 @@
   // status + timestamp. Events never change once written, so every entry
   // in changedIdx here is a brand-new row, never an in-place update.
   function rptMergeProgressionRows(existingData, newData) {
-    var seen = {};
+    var seen = new Set();
     var merged = [];
     var changedIdx = [];
     function tsKey(v) {
@@ -622,8 +712,8 @@
       var est = (erow[8] || '').toString().trim();
       if (!eon || !est) continue;
       var ekey = eon + '|' + est + '|' + tsKey(erow[9]);
-      if (seen[ekey]) continue;
-      seen[ekey] = true;
+      if (seen.has(ekey)) continue;
+      seen.add(ekey);
       merged.push(erow);
     }
     for (var j = 0; j < newData.length; j++) {
@@ -632,8 +722,8 @@
       var nst = (nrow[8] || '').toString().trim();
       if (!non || !nst) continue;
       var nkey = non + '|' + nst + '|' + tsKey(nrow[9]);
-      if (seen[nkey]) continue;
-      seen[nkey] = true;
+      if (seen.has(nkey)) continue;
+      seen.add(nkey);
       changedIdx.push(merged.length);
       merged.push(nrow);
     }
@@ -810,8 +900,21 @@
           var fsPfx    = (key === 'order') ? FS_ORDER_PFX : FS_STATUS_PFX;
           var fsField  = (key === 'order') ? 'orderChunks' : 'statusChunks';
           var fsBField = (key === 'order') ? 'orderBytes'  : 'statusBytes';
-          var fsResult = await fsWrite(fsPfx, allRows.slice(1), function (pct) { _fsPct = pct; _rptCombinedBar(); });
-          var fsUpdate = {}; fsUpdate[fsField] = fsResult.count; fsUpdate[fsBField] = fsResult.bytes;
+          var fsMField = (key === 'order') ? 'orderMode'   : 'statusMode';
+          var fsSField = (key === 'order') ? 'orderChunkBytes' : 'statusChunkBytes';
+          // mergedData is the exact array `allRows.slice(1)` used to build —
+          // passing it directly skips a full copy of the dataset, and
+          // changedIdx/baseRows let fsWrite rewrite only the buckets that
+          // actually moved instead of all of them.
+          var fsResult = await fsWrite(fsPfx, mergedData, function (pct) { _fsPct = pct; _rptCombinedBar(); }, {
+            changedIdx: isFirstEverUpload ? null : changedIdx,
+            baseRows:   existingData.length
+          });
+          var fsUpdate = {};
+          fsUpdate[fsField]  = fsResult.count;
+          fsUpdate[fsBField] = fsResult.bytes;
+          fsUpdate[fsMField] = fsResult.mode;
+          fsUpdate[fsSField] = fsResult.sizes;
           fsUpdate.uploadedBy = 'Settings upload';
           fsUpdate.updatedAt  = Date.now();
           await _fbDb.collection(FS_COL).doc(FS_META).set(fsUpdate, { merge: true });
