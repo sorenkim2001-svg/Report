@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Raleway:wght@400;500;600;700;800&family=Nunito+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <style>
+    @font-face {
+      font-family: 'Proxima Nova';
+      src: local('Proxima Nova'), local('ProximaNova');
+      font-weight: 400 900;
+    }
+    :root {
+      --primary: #3b82f6;
+      --bg-dark: #0c0c10;
+      --bg-card: #13131a;
+      --bg-hover: #1a1a24;
+      --border: rgba(255,255,255,0.07);
+      --border-bright: rgba(255,255,255,0.14);
+      --text-primary: #e8e8f0;
+      --text-secondary: #6b6b80;
+    }
+    /* Light theme — redefines the same variables so every element reading
+       var(--text-secondary) etc. gets the right color automatically,
+       instead of needing a body.light override per class. */
+    body.light {
+      --bg-dark: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-hover: #f1f5f9;
+      --border: #e2e8f0;
+      --border-bright: #cbd5e1;
+      --text-primary: #0f172a;
+      --text-secondary: #64748b;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Inter', 'Nunito Sans', sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-primary);
+      min-height: 100vh;
+      transition: background-color .35s ease, color .35s ease;
+    }
+    /* No dashboard to go "back" to in this standalone app */
+    #rpt-back-btn { display: none !important; }
+
+    /* ── Force Inter across Settings / Upload Log UI (outside #reports-main-section) ── */
+    #rpt-settings-modal, #rpt-settings-modal *,
+    #rpt-settings-minimized-pill, #rpt-settings-minimized-pill *,
+    #rpt-uploadlog-modal, #rpt-uploadlog-modal * {
+      font-family: 'Inter', 'Nunito Sans', 'Segoe UI', Arial, sans-serif !important;
+    }
+
+    /* ── Settings FAB + modal ── */
+    .rpt-settings-fab {
+      position: fixed; bottom: 22px; right: 22px;
+      width: 52px; height: 52px; border-radius: 50%;
+      background: linear-gradient(135deg, #818cf8, #a855f7);
+      border: 1px solid rgba(255,255,255,.2);
+      color: #fff; font-size: 20px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+      z-index: 500; transition: transform .2s ease;
+    }
+    .rpt-settings-fab:hover { transform: translateY(-2px) scale(1.06); }
+
+    #rpt-settings-modal {
+      display: none; position: fixed; inset: 0; z-index: 2000;
+      background: rgba(0,0,0,.6); backdrop-filter: blur(3px);
+      align-items: center; justify-content: center;
+    }
+    #rpt-settings-modal.open { display: flex; }
+    .rpt-settings-box {
+      width: min(480px, 92vw);
+      background: var(--bg-card); border: 1px solid var(--border-bright);
+      border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+      overflow: hidden;
+      font-family: 'Proxima Nova','Nunito Sans','Segoe UI',Arial,sans-serif;
+    }
+    .rpt-settings-hdr {
+      padding: 16px 20px; border-bottom: 1px solid var(--border-bright);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .rpt-settings-title { font-family:'Raleway',sans-serif; font-weight:800; font-size:15px; color: var(--text-primary); }
+    .rpt-settings-close {
+      background: rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15);
+      color: var(--text-secondary); width:30px; height:30px; border-radius:8px;
+      cursor:pointer; font-size:14px;
+    }
+    .rpt-settings-min-btn {
+      background: rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15);
+      color: var(--text-secondary); width:30px; height:30px; border-radius:8px;
+      cursor:pointer; font-size:16px; line-height:1; font-weight:800;
+    }
+    .rpt-settings-min-btn:hover { background: rgba(129,140,248,.18); border-color: rgba(129,140,248,.4); color:#a5b4fc; }
+
+    #rpt-settings-minimized-pill {
+      display: none; align-items: center; gap: 10px;
+      position: fixed; bottom: 22px; right: 84px;
+      background: linear-gradient(135deg, #818cf8, #a855f7);
+      color: #fff; border: 1px solid rgba(255,255,255,.25);
+      padding: 10px 18px 10px 14px; border-radius: 99px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45);
+      cursor: pointer; z-index: 501; max-width: 340px;
+      font-family: 'DM Mono', monospace; font-size: 11.5px; font-weight: 700;
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+    #rpt-settings-minimized-pill:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+    #rpt-settings-minimized-pill.show { display: flex; }
+    #rpt-settings-minimized-pill-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rpt-min-pill-spinner {
+      width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+      border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
+      animation: rptMinSpin .8s linear infinite;
+    }
+    @keyframes rptMinSpin { to { transform: rotate(360deg); } }
+    .rpt-settings-body { padding: 20px; display:flex; flex-direction:column; gap:14px; }
+    .rpt-settings-note {
+      font-size: 10.5px; color: var(--text-secondary); line-height:1.6;
+      background: rgba(129,140,248,.06); border:1px solid rgba(129,140,248,.16);
+      border-radius:10px; padding:10px 12px;
+    }
+    .rpt-upload-pill {
+      display:flex; align-items:center; gap:12px;
+      border: 1.5px dashed rgba(255,255,255,.16);
+      background: rgba(255,255,255,.02);
+      border-radius: 12px; padding: 14px 16px;
+      cursor: pointer; position: relative; overflow: hidden;
+      transition: all .2s ease;
+    }
+    .rpt-upload-pill:hover { border-color: rgba(129,140,248,.5); background: rgba(129,140,248,.06); }
+    .rpt-upload-pill.busy { border-color: rgba(129,140,248,.6); border-style: solid; }
+    .rpt-upload-pill.ok   { border-color: rgba(34,197,94,.5);  border-style: solid; }
+    .rpt-upload-pill.err  { border-color: rgba(239,68,68,.5);  border-style: solid; }
+    .rpt-upload-icon { font-size: 22px; }
+    .rpt-upload-name { font-family:'Raleway',sans-serif; font-weight:700; font-size:13px; color: var(--text-primary); }
+    .rpt-upload-sub  { font-size: 10.5px; color: var(--text-secondary); margin-top:2px; }
+    .rpt-upload-cta  {
+      margin-left:auto; font-size:10px; color:#818cf8;
+      background:rgba(129,140,248,.1); border:1px solid rgba(129,140,248,.25);
+      border-radius:6px; padding:4px 10px; font-weight:700; white-space:nowrap;
+    }
+    .rpt-upload-bar {
+      position:absolute; bottom:0; left:0; height:2px; width:0%;
+      background: linear-gradient(90deg,#818cf8,#22c55e); transition: width .3s;
+    }
+  </style>
+</head>
+<body class="light">
+
+<script>
+  var RPT_SHARE_STATE = <?!= rptShareState ?>;
+
+  /* ═══ THEME — apply saved light/dark preference before first paint ═══ */
+  (function _rptInitTheme(){
+    var saved = null;
+    try { saved = localStorage.getItem('rpt_theme'); } catch(e) {}
+    if (saved === 'dark') document.body.classList.remove('light');
+    else document.body.classList.add('light');
+  })();
+  function rptToggleTheme(force){
+    var isLight = document.body.classList.contains('light');
+    var next = typeof force === 'boolean' ? force : !isLight;
+    document.body.classList.toggle('light', next);
+    try { localStorage.setItem('rpt_theme', next ? 'light' : 'dark'); } catch(e) {}
+    var sec = document.getElementById('reports-main-section');
+    if (sec && sec.classList.contains('active') && typeof rptDrawDonut === 'function') {
+      setTimeout(rptDrawDonut, 60);
+    }
+  }
+
+  /* ═══ FIREBASE — shared data store (mirrors Logistic Reports module) ═══ */
+  var _fbApp, _fbDb, _fsListener = null;
+  try {
+    var _fbCfg = {apiKey:"AIzaSyC5btoj3fGhyD-PcGrVU8totrKFX5MI-uY",authDomain:"report-489b1.firebaseapp.com",projectId:"report-489b1",storageBucket:"report-489b1.firebasestorage.app",messagingSenderId:"937227109823",appId:"1:937227109823:web:8913ab93e9317c59adcd0a"};
+    _fbApp = firebase.apps.length ? firebase.apps[0] : firebase.initializeApp(_fbCfg);
+    _fbDb  = firebase.firestore(_fbApp);
+    // The default WebChannel transport can hang silently inside the
+    // sandboxed Apps Script iframe (this is why it kept loading forever
+    // even with data in Firestore) — force plain XHR long-polling instead.
+    _fbDb.settings({ experimentalForceLongPolling: true });
+  } catch(e) { console.warn('Firestore init failed:', e); }
+
+  var FS_COL = 'lgr_data';
+  var FS_META = 'metadata';
+  var FS_ORDER_PFX  = 'order_chunk_';
+  var FS_STATUS_PFX = 'status_chunk_';
+  var FS_CHUNK_SIZE = 900000;
+  var FS_UPLOAD_CONCURRENCY = 32; // more chunks in flight at once = faster Firestore sync
+  var _hasNativeGzip = typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
+
+  async function fastCompress(str) {
+    if (!_hasNativeGzip) return LZString.compressToBase64(str);
+    var enc = new TextEncoder().encode(str);
+    var stream = new Blob([enc]).stream().pipeThrough(new CompressionStream('gzip'));
+    var buf = await new Response(stream).arrayBuffer();
+    var bytes = new Uint8Array(buf);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return 'gz:' + btoa(bin);
+  }
+  async function fastDecompress(b64) {
+    if (!b64) return '[]';
+    if (!b64.startsWith('gz:')) return LZString.decompressFromBase64(b64) || '[]';
+    if (!_hasNativeGzip) throw new Error('Browser cannot read gzip data.');
+    var bin = atob(b64.slice(3));
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    var buf = await new Response(stream).arrayBuffer();
+    return new TextDecoder().decode(buf);
+  }
+
+  async function fsWrite(pfx, rows, onProgress) {
+    if (!_fbDb) throw new Error('Firestore not ready');
+    var serialized = new Array(rows.length);
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i], out = new Array(r.length);
+      for (var j = 0; j < r.length; j++) {
+        var c = r[j];
+        out[j] = c instanceof Date ? { __d: c.toISOString() } : (c == null ? '' : c);
+      }
+      serialized[i] = out;
+    }
+
+    var field = pfx.indexOf('order') >= 0 ? 'orderChunks' : 'statusChunks';
+
+    // Old-chunk lookup now runs WHILE compression happens instead of after
+    // it — they don't depend on each other, so overlapping them removes a
+    // full round-trip from the critical path before any write can start.
+    var oldMetaPromise = _fbDb.collection(FS_COL).doc(FS_META).get().catch(function(){ return null; });
+    var cmpPromise = fastCompress(JSON.stringify(serialized));
+
+    var oldMeta = await oldMetaPromise;
+    if (oldMeta && oldMeta.exists) {
+      var oldCount = oldMeta.data()[field] || 0;
+      if (oldCount > 0) {
+        Promise.all(Array.from({ length: oldCount }, function(_, i){ return _fbDb.collection(FS_COL).doc(pfx + i).delete().catch(function(){}); }));
+      }
+    }
+
+    var cmp = await cmpPromise;
+    var chunks = [];
+    for (var k = 0; k < cmp.length; k += FS_CHUNK_SIZE) chunks.push({ idx: chunks.length, data: cmp.substring(k, k + FS_CHUNK_SIZE) });
+    if (!chunks.length) chunks.push({ idx: 0, data: '' });
+
+    var done = 0;
+    for (var s = 0; s < chunks.length; s += FS_UPLOAD_CONCURRENCY) {
+      var batch = chunks.slice(s, s + FS_UPLOAD_CONCURRENCY);
+      await Promise.all(batch.map(function(chunk) {
+        return _fbDb.collection(FS_COL).doc(pfx + chunk.idx).set({ data: chunk.data, idx: chunk.idx, ts: Date.now() }).then(function(){
+          done++;
+          if (onProgress) onProgress(Math.round((done / chunks.length) * 100));
+        });
+      }));
+    }
+    return { count: chunks.length, bytes: cmp.length };
+  }
+
+  async function fsGetMeta() {
+    if (!_fbDb) return null;
+    try { var s = await _fbDb.collection(FS_COL).doc(FS_META).get(); return s.exists ? s.data() : null; } catch(e) { return null; }
+  }
+
+  async function fetchFromFirestore() {
+    if (!_fbDb) { console.log('[Reports] Firestore not initialized.'); return false; }
+    try {
+      var meta = await fsGetMeta();
+      if (!meta) { console.log('[Reports] Firestore metadata doc doesn\'t exist — nothing has been uploaded to this Firebase project yet.'); return false; }
+      var orderChunks = meta.orderChunks || 0;
+      var statusChunks = meta.statusChunks || 0;
+      console.log('[Reports] Firestore meta — orderChunks:', orderChunks, '| statusChunks:', statusChunks);
+      if (!orderChunks && !statusChunks) return false;
+
+      var orderDocIds = Array.from({ length: orderChunks }, function(_, i){ return FS_ORDER_PFX + i; });
+      var statusDocIds = Array.from({ length: statusChunks }, function(_, i){ return FS_STATUS_PFX + i; });
+      var allDocIds = orderDocIds.concat(statusDocIds);
+      var allDocs = await Promise.all(allDocIds.map(function(id){ return _fbDb.collection(FS_COL).doc(id).get(); }));
+
+      var orderRows = [], statusRows = [];
+      if (orderChunks > 0) {
+        var cmpO = allDocs.slice(0, orderChunks).map(function(s){ return (s.data() && s.data().data) || ''; }).join('');
+        if (cmpO) {
+          var rawO = JSON.parse(await fastDecompress(cmpO));
+          orderRows = rawO.map(function(r){ return r.map(function(c){ return (c && typeof c === 'object' && c.__d) ? new Date(c.__d) : c; }); });
+        }
+      }
+      if (statusChunks > 0) {
+        var cmpS = allDocs.slice(orderChunks).map(function(s){ return (s.data() && s.data().data) || ''; }).join('');
+        if (cmpS) {
+          var rawS = JSON.parse(await fastDecompress(cmpS));
+          statusRows = rawS.map(function(r){ return r.map(function(c){ return (c && typeof c === 'object' && c.__d) ? new Date(c.__d) : c; }); });
+        }
+      }
+
+      if (orderRows.length) window.lgrOrderData = (typeof _rptFixMultibrandRows === 'function') ? _rptFixMultibrandRows([[]].concat(orderRows)) : [[]].concat(orderRows);
+      if (statusRows.length) window.lgrStatusData = [[]].concat(statusRows);
+      // Both datasets must be complete before this counts as a real load —
+      // this used to be OR (accept if EITHER has data), which meant a read
+      // that caught order data mid-way through a status-data write got
+      // reported as "loaded" and rendered with real order counts but every
+      // status/SLA lookup failing — i.e. a dashboard full of zeros.
+      var orderOk  = orderChunks  === 0 || orderRows.length  > 0;
+      var statusOk = statusChunks === 0 || statusRows.length > 0;
+      return orderOk && statusOk && (orderRows.length > 0 || statusRows.length > 0);
+    } catch(e) {
+      console.warn('[Reports] Firestore fetch error:', e);
+      return false;
+    }
+  }
+
+  function startFsListener() {
+    if (!_fbDb || _fsListener) return;
+    _fsListener = _fbDb.collection(FS_COL).doc(FS_META).onSnapshot(function(snap) {
+      if (!snap.exists) return;
+      var meta = snap.data() || {};
+      fetchFromFirestore().then(function(ok) {
+        if (!ok) return;
+        if (typeof _rptInvalidateAiCaches === 'function') _rptInvalidateAiCaches();
+        if (typeof rptSetSyncBadge === 'function') rptSetSyncBadge(meta.updatedAt || Date.now(), 'ok', meta.uploadedBy);
+        if (typeof _rptNoDataPollTimer !== 'undefined' && _rptNoDataPollTimer) {
+          clearInterval(_rptNoDataPollTimer);
+          _rptNoDataPollTimer = null;
+        }
+        var sec = document.getElementById('reports-main-section');
+        if (sec && sec.classList.contains('active') && typeof rptMainRender === 'function') {
+          rptMainPopulateChannelFilter();
+          rptMainRender();
+        }
+      });
+    }, function(err){ console.warn('Firestore listener:', err); });
+  }
+</script>
+
+<?!= include('Reports'); ?>
+
+<div id="rpt-settings-modal" onclick="if(event.target===this) rptCloseSettings()">
+  <div class="rpt-settings-box">
+    <div class="rpt-settings-hdr">
+      <div class="rpt-settings-title">⚙️ Settings</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button class="rpt-settings-min-btn" onclick="rptMinimizeSettings()" title="Minimize — keep uploading and view reports">─</button>
+        <button class="rpt-settings-close" onclick="rptCloseSettings()">✕</button>
+      </div>
+    </div>
+    <div class="rpt-settings-body">
+      <div class="rpt-settings-note">Upload the two report ZIPs (each containing XLS/XLSX/CSV exports) to populate this dashboard. New uploads are merged into existing data — matching orders/status events are updated, new ones are added, so nothing already stored gets wiped out.</div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 2px 4px;">
+        <div class="rpt-upload-name">🌓 Theme</div>
+        <button id="rpt-theme-switch" class="rpt-theme-switch" onclick="rptToggleTheme()" title="Toggle light / dark mode" aria-label="Toggle theme">
+          <span class="rpt-theme-track">
+            <span class="rpt-theme-icon rpt-theme-icon-sun">☀️</span>
+            <span class="rpt-theme-icon rpt-theme-icon-moon">🌙</span>
+            <span class="rpt-theme-thumb"></span>
+          </span>
+        </button>
+      </div>
+
+      <div class="rpt-upload-pill" id="rpt-up-order" onclick="rptPickZip('order')">
+        <span class="rpt-upload-icon">📋</span>
+        <div>
+          <div class="rpt-upload-name">Order Report</div>
+          <div class="rpt-upload-sub" id="rpt-up-order-sub">ZIP of XLS/XLSX/CSV</div>
+        </div>
+        <span class="rpt-upload-cta">⬆ ZIP</span>
+        <div class="rpt-upload-bar" id="rpt-up-order-bar"></div>
+        <input type="file" id="rpt-file-order" accept=".zip" style="display:none" onchange="rptZipPicked(event,'order')">
+      </div>
+
+      <div class="rpt-upload-pill" id="rpt-up-prog" onclick="rptPickZip('prog')">
+        <span class="rpt-upload-icon">📊</span>
+        <div>
+          <div class="rpt-upload-name">Progression</div>
+          <div class="rpt-upload-sub" id="rpt-up-prog-sub">ZIP of XLS/XLSX/CSV</div>
+        </div>
+        <span class="rpt-upload-cta">⬆ ZIP</span>
+        <div class="rpt-upload-bar" id="rpt-up-prog-bar"></div>
+        <input type="file" id="rpt-file-prog" accept=".zip" style="display:none" onchange="rptZipPicked(event,'prog')">
+      </div>
+
+      <button onclick="rptOpenUploadLog()" style="display:flex;align-items:center;justify-content:center;gap:8px;background:rgba(129,140,248,.1);border:1px solid rgba(129,140,248,.3);color:#a5b4fc;padding:10px 14px;border-radius:10px;cursor:pointer;font-family:'DM Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:.5px;">📅 View Upload Log</button>
+    </div>
+  </div>
+</div>
+
+<div id="rpt-settings-minimized-pill" onclick="rptRestoreSettings()" title="Reopen Settings">
+  <div class="rpt-min-pill-spinner"></div>
+  <span id="rpt-settings-minimized-pill-text">Settings minimized — tap to reopen</span>
+</div>
+
+<div id="rpt-uploadlog-modal" onclick="if(event.target===this) rptCloseUploadLog()" style="display:none;position:fixed;inset:0;z-index:2100;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);align-items:center;justify-content:center;">
+  <div style="width:min(520px,92vw);max-height:80vh;background:var(--bg-card);border:1px solid var(--border-bright);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;font-family:'Proxima Nova','Nunito Sans','Segoe UI',Arial,sans-serif;">
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border-bright);display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-family:'Raleway',sans-serif;font-weight:800;font-size:15px;color:var(--text-primary);">📅 Upload Log</div>
+      <button onclick="rptCloseUploadLog()" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:var(--text-secondary);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:14px;">✕</button>
+    </div>
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="font-family:'DM Mono',monospace;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;">Firestore storage used</div>
+        <div id="rpt-uploadlog-storage-pct" style="font-family:'DM Mono',monospace;font-size:11px;font-weight:800;color:var(--text-primary);">—</div>
+      </div>
+      <div style="height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;">
+        <div id="rpt-uploadlog-storage-bar" style="height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#818cf8,#a855f7);transition:width .4s ease;"></div>
+      </div>
+      <div id="rpt-uploadlog-storage-label" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text-secondary);margin-top:6px;line-height:1.5;">—</div>
+    </div>
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+      <div style="font-family:'DM Mono',monospace;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;margin-bottom:8px;">Months currently in store</div>
+      <div id="rpt-uploadlog-months" style="display:flex;flex-wrap:wrap;gap:6px;">—</div>
+    </div>
+    <div style="padding:14px 20px 8px;font-family:'DM Mono',monospace;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;">Upload history</div>
+    <div id="rpt-uploadlog-list" style="overflow-y:auto;flex:1;padding:4px 20px 16px;display:flex;flex-direction:column;gap:10px;">Loading…</div>
+  </div>
+</div>
+
+<script>
+  // Reports.html (included above) already defines the real openReports()/
+  // closeReports() — including the default "last 30 days" range and tab
+  // styling, wrapped around the base open/show-loading/init logic. This
+  // block used to redefine both here too, and since this script runs AFTER
+  // the include in document order, it silently overwrote the complete
+  // versions — the date range default never applied (you saw the full
+  // all-time range instead), and Back did nothing (its own closeReports
+  // was a no-op).
+  document.addEventListener('DOMContentLoaded', function () { openReports(); });
+
+  // ── Settings modal ──
+  var _rptSettingsMinimized = false;
+
+  function rptOpenSettings(){
+    document.getElementById('rpt-settings-modal').classList.add('open');
+    _rptSettingsMinimized = false;
+    var pill = document.getElementById('rpt-settings-minimized-pill');
+    if (pill) pill.classList.remove('show');
+  }
+  function rptCloseSettings(){
+    document.getElementById('rpt-settings-modal').classList.remove('open');
+    _rptSettingsMinimized = false;
+    var pill = document.getElementById('rpt-settings-minimized-pill');
+    if (pill) pill.classList.remove('show');
+  }
+
+  // Hides the modal but leaves any in-flight upload untouched (uploads were
+  // never tied to modal visibility) and surfaces a floating pill with live
+  // progress so it's obvious how to get back in.
+  function rptMinimizeSettings(){
+    document.getElementById('rpt-settings-modal').classList.remove('open');
+    _rptSettingsMinimized = true;
+    var pill = document.getElementById('rpt-settings-minimized-pill');
+    if (pill) pill.classList.add('show');
+    _rptUpdateMinimizedPillText();
+  }
+  function rptRestoreSettings(){
+    _rptSettingsMinimized = false;
+    var pill = document.getElementById('rpt-settings-minimized-pill');
+    if (pill) pill.classList.remove('show');
+    document.getElementById('rpt-settings-modal').classList.add('open');
+  }
+  function _rptUpdateMinimizedPillText(){
+    if (!_rptSettingsMinimized) return;
+    var textEl = document.getElementById('rpt-settings-minimized-pill-text');
+    if (!textEl) return;
+    var orderPill = document.getElementById('rpt-up-order');
+    var progPill  = document.getElementById('rpt-up-prog');
+    var orderSub  = document.getElementById('rpt-up-order-sub');
+    var progSub   = document.getElementById('rpt-up-prog-sub');
+    if (orderPill && orderPill.classList.contains('busy')) {
+      textEl.textContent = 'Order Report — ' + (orderSub ? orderSub.textContent : 'uploading…');
+    } else if (progPill && progPill.classList.contains('busy')) {
+      textEl.textContent = 'Progression — ' + (progSub ? progSub.textContent : 'uploading…');
+    } else {
+      textEl.textContent = 'Settings minimized — tap to reopen';
+    }
+  }
+
+  var RPT_UPLOAD_CFG = {
+    order: { sheet: 'Order report',                 label: 'Order Report' },
+    prog:  { sheet: 'OrderStatusProgression Report', label: 'Progression'  }
+  };
+
+  function rptPickZip(key){ document.getElementById('rpt-file-' + key).click(); }
+
+  function rptZipPicked(e, key) {
+    var f = e.target.files[0];
+    e.target.value = '';
+    if (f) rptProcessZip(f, key);
+  }
+
+  function rptSetPillState(key, state, msg) {
+    var pill = document.getElementById('rpt-up-' + key);
+    var sub  = document.getElementById('rpt-up-' + key + '-sub');
+    if (pill) pill.className = 'rpt-upload-pill' + (state ? ' ' + state : '');
+    if (sub && msg) sub.textContent = msg;
+    _rptUpdateMinimizedPillText();
+  }
+  function rptSetBar(key, pct) {
+    var bar = document.getElementById('rpt-up-' + key + '-bar');
+    if (bar) bar.style.width = pct + '%';
+  }
+
+  var _rptWebAppUrl = null;
+  function _rptGetUploadUrl() {
+    if (_rptWebAppUrl) return Promise.resolve(_rptWebAppUrl);
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function (url) { _rptWebAppUrl = url; resolve(url); })
+        .withFailureHandler(reject)
+        .getWebAppUrl();
+    });
+  }
+
+  function rptToCsv(rows) {
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i], cells = [];
+      for (var j = 0; j < row.length; j++) {
+        var v = row[j], s;
+        if (v instanceof Date) s = v.toISOString();
+        else if (v === null || v === undefined) s = '';
+        else s = String(v).replace(/\r/g, '');
+        if (s.indexOf(',') > -1 || s.indexOf('"') > -1 || s.indexOf('\n') > -1) s = '"' + s.replace(/"/g, '""') + '"';
+        cells.push(s);
+      }
+      out.push(cells.join(','));
+    }
+    return out.join('\n');
+  }
+
+  // ── Row-level equality — treats a Date and its equivalent value as equal
+  // so round-tripping through CSV/Sheets doesn't look like a "change" ──
+  function _rptRowValsEqual(v1, v2) {
+    if (v1 instanceof Date || v2 instanceof Date) {
+      var t1 = v1 instanceof Date ? v1.getTime() : new Date(v1).getTime();
+      var t2 = v2 instanceof Date ? v2.getTime() : new Date(v2).getTime();
+      if (isNaN(t1) && isNaN(t2)) return true;
+      return t1 === t2;
+    }
+    return (v1 == null ? '' : String(v1)) === (v2 == null ? '' : String(v2));
+  }
+  function _rptRowsEqual(a, b) {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!_rptRowValsEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  // Turns a list of changed row indices (0-based, into `merged`) into
+  // contiguous write runs. Gaps of up to maxGap untouched rows get bridged
+  // into the same run (filled with their current value) so a scatter of
+  // small edits doesn't turn into thousands of one-row requests — only
+  // genuinely large untouched stretches (whole old months) stay excluded.
+  function rptBuildWriteRuns(merged, changedIdx, maxGap) {
+    maxGap = maxGap || 50;
+    var runs = [];
+    var i = 0;
+    while (i < changedIdx.length) {
+      var start = i;
+      while (i + 1 < changedIdx.length && (changedIdx[i + 1] - changedIdx[i]) <= maxGap + 1) i++;
+      var startIdx = changedIdx[start], endIdx = changedIdx[i];
+      var rows = [];
+      for (var k = startIdx; k <= endIdx; k++) rows.push(merged[k]);
+      runs.push({ startRow: startIdx + 2, rows: rows }); // +2: header row + 1-based
+      i++;
+    }
+    return runs;
+  }
+
+  // ── Diff new upload rows against the existing dataset (upsert): only
+  // rows that are NEW or actually CHANGED get flagged. Both args are DATA
+  // ROWS ONLY (no header). Returns { merged, changedIdx } — `merged` is the
+  // full dataset, `changedIdx` are 0-based positions in `merged` that are
+  // new or different from what was already stored.
+  function rptMergeOrderRows(existingData, newData) {
+    var map = {};     // order number -> row
+    var order = [];   // first-seen order, so output stays roughly stable
+    var changed = {}; // order number -> true, only for new/actually-different rows
+    for (var i = 0; i < existingData.length; i++) {
+      var erow = existingData[i];
+      var eon = (erow[3] || '').toString().trim();
+      if (!eon) continue;
+      if (!map[eon]) order.push(eon);
+      map[eon] = erow;
+    }
+    for (var j = 0; j < newData.length; j++) {
+      var nrow = newData[j];
+      var non = (nrow[3] || '').toString().trim();
+      if (!non) continue;
+      if (!map[non]) { order.push(non); changed[non] = true; }
+      else if (!_rptRowsEqual(map[non], nrow)) { changed[non] = true; }
+      map[non] = nrow; // whichever ingest runs LAST wins
+    }
+    var merged = order.map(function (on) { return map[on]; });
+    var changedIdx = [];
+    for (var k = 0; k < order.length; k++) if (changed[order[k]]) changedIdx.push(k);
+    return { merged: merged, changedIdx: changedIdx };
+  }
+
+  // Progression report: each row is one status EVENT, keyed on order +
+  // status + timestamp. Events never change once written, so every entry
+  // in changedIdx here is a brand-new row, never an in-place update.
+  function rptMergeProgressionRows(existingData, newData) {
+    var seen = {};
+    var merged = [];
+    var changedIdx = [];
+    function tsKey(v) {
+      if (!v) return '';
+      var d = v instanceof Date ? v : new Date(v);
+      return isNaN(d.getTime()) ? String(v) : d.getTime();
+    }
+    for (var i = 0; i < existingData.length; i++) {
+      var erow = existingData[i];
+      var eon = (erow[3] || '').toString().trim();
+      var est = (erow[8] || '').toString().trim();
+      if (!eon || !est) continue;
+      var ekey = eon + '|' + est + '|' + tsKey(erow[9]);
+      if (seen[ekey]) continue;
+      seen[ekey] = true;
+      merged.push(erow);
+    }
+    for (var j = 0; j < newData.length; j++) {
+      var nrow = newData[j];
+      var non = (nrow[3] || '').toString().trim();
+      var nst = (nrow[8] || '').toString().trim();
+      if (!non || !nst) continue;
+      var nkey = non + '|' + nst + '|' + tsKey(nrow[9]);
+      if (seen[nkey]) continue;
+      seen[nkey] = true;
+      changedIdx.push(merged.length);
+      merged.push(nrow);
+    }
+    return { merged: merged, changedIdx: changedIdx };
+  }
+
+  async function rptProcessZip(file, key) {
+    var cfg = RPT_UPLOAD_CFG[key];
+    rptSetPillState(key, 'busy', 'Reading…');
+    rptSetBar(key, 5);
+    try {
+      var zip = await JSZip.loadAsync(file);
+      var entries = [];
+      zip.forEach(function (path, entry) {
+        if (!entry.dir && /\.(xls|xlsx|csv)$/i.test(path)) entries.push({ path: path, entry: entry });
+      });
+      entries.sort(function (a, b) { return a.path.localeCompare(b.path); });
+
+      if (!entries.length) {
+        rptSetPillState(key, 'err', 'No XLS/XLSX/CSV found in ZIP');
+        rptSetBar(key, 0);
+        return;
+      }
+
+      var allRows = [];
+      // Parse up to 4 files concurrently instead of one at a time — order is
+      // still preserved via parsedByIndex, so the "only first file keeps its
+      // header" rule below is unaffected.
+      var PARSE_CONCURRENCY = 4;
+      var parsedByIndex = new Array(entries.length);
+      var _parseDone = 0;
+      async function _rptParseEntry(i) {
+        var fname = entries[i].path.split('/').pop();
+        var ab = await entries[i].entry.async('arraybuffer');
+        var wb;
+        if (/\.csv$/i.test(fname)) {
+          wb = XLSX.read(new TextDecoder().decode(ab), { type: 'string', cellDates: true });
+        } else {
+          wb = XLSX.read(ab, { type: 'array', cellDates: true, dense: true, raw: false });
+        }
+        parsedByIndex[i] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', blankrows: false });
+        _parseDone++;
+        rptSetPillState(key, 'busy', 'Parsing ' + _parseDone + '/' + entries.length + ': ' + fname);
+        rptSetBar(key, 10 + Math.round((_parseDone / entries.length) * 25));
+      }
+      var _parseCursor = 0;
+      async function _rptParseWorker() {
+        while (_parseCursor < entries.length) {
+          var next = _parseCursor++;
+          await _rptParseEntry(next);
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(PARSE_CONCURRENCY, entries.length) }, _rptParseWorker)
+      );
+      for (var i = 0; i < entries.length; i++) {
+        var data = (i === 0) ? parsedByIndex[i] : parsedByIndex[i].slice(1); // only keep the header from the first file
+        for (var r = 0; r < data.length; r++) {
+          var row = data[r];
+          var hasVal = row.some(function (c) { return c !== null && c !== undefined && c !== ''; });
+          if (hasVal) allRows.push(row);
+        }
+      }
+
+      // ── Diff against existing data (upsert) instead of full replace ──
+      // Only rows that are genuinely NEW or whose content actually CHANGED
+      // get uploaded — unchanged rows are skipped entirely, so a ZIP
+      // covering an overlapping period no longer re-uploads months of data
+      // that never changed.
+      rptSetPillState(key, 'busy', 'Comparing with existing data…');
+      var _loadOk = await rptEnsureDataLoaded(false);
+      if (!_loadOk) {
+        rptSetPillState(key, 'err', 'Could not verify existing data — upload cancelled so nothing gets overwritten. Try again.');
+        rptSetBar(key, 0);
+        setTimeout(function () { rptSetPillState(key, '', 'ZIP of XLS/XLSX/CSV'); }, 4000);
+        return;
+      }
+      var newHeader    = allRows[0] || [];
+      var newDataRows  = allRows.slice(1);
+      var existingData = (key === 'order')
+        ? ((typeof lgrOrderData  !== 'undefined' && lgrOrderData.length  > 1) ? lgrOrderData.slice(1)  : [])
+        : ((typeof lgrStatusData !== 'undefined' && lgrStatusData.length > 1) ? lgrStatusData.slice(1) : []);
+      var diffResult  = (key === 'order')
+        ? rptMergeOrderRows(existingData, newDataRows)
+        : rptMergeProgressionRows(existingData, newDataRows);
+      var mergedData = diffResult.merged;
+      var changedIdx = diffResult.changedIdx; // positions that are new or actually changed
+      allRows = [newHeader].concat(mergedData);
+
+      var isFirstEverUpload = existingData.length === 0;
+
+      // Nothing new or changed — skip the network round trips entirely.
+      if (!isFirstEverUpload && changedIdx.length === 0) {
+        if (key === 'order') window.lgrOrderData  = [[]].concat(mergedData);
+        if (key === 'prog')  window.lgrStatusData = [[]].concat(mergedData);
+        rptSetBar(key, 100);
+        rptSetPillState(key, 'ok', '✓ Already up to date — no changes (' + mergedData.length.toLocaleString() + ' total)');
+        setTimeout(function () {
+          rptSetBar(key, 0);
+          rptSetPillState(key, '', 'ZIP of XLS/XLSX/CSV');
+        }, 3000);
+        return;
+      }
+
+      // Sheet write + Firestore sync now run CONCURRENTLY, each sending its
+      // own chunks in parallel batches.
+      rptSetPillState(key, 'busy',
+        isFirstEverUpload
+          ? 'Uploading ' + mergedData.length.toLocaleString() + ' rows… (Sheet + Firestore)'
+          : 'Updating ' + changedIdx.length.toLocaleString() + ' of ' + mergedData.length.toLocaleString() + ' rows… (Sheet + Firestore)'
+      );
+      var baseUrl = await _rptGetUploadUrl();
+
+      var chunkSize = 40000; // bigger chunks = fewer Apps Script round trips
+      var chunks = [];
+      if (isFirstEverUpload) {
+        // Nothing stored yet — write everything once, header included.
+        for (var s = 0; s < allRows.length; s += chunkSize) {
+          chunks.push({ idx: chunks.length, clear: s === 0, startRow: s + 1, csv: rptToCsv(allRows.slice(s, s + chunkSize)) });
+        }
+        if (!chunks.length) chunks.push({ idx: 0, clear: true, startRow: 1, csv: '' });
+      } else {
+        // Only touch rows that are actually new or different — this
+        // replaces sending the ENTIRE merged dataset on every upload.
+        var runs = rptBuildWriteRuns(mergedData, changedIdx);
+        runs.forEach(function (run) {
+          for (var off = 0; off < run.rows.length; off += chunkSize) {
+            var slice = run.rows.slice(off, off + chunkSize);
+            chunks.push({ idx: chunks.length, clear: false, startRow: run.startRow + off, csv: rptToCsv(slice) });
+          }
+        });
+      }
+
+      var _sheetPct = 0, _fsPct = 0;
+      function _rptCombinedBar() { rptSetBar(key, 35 + Math.round(((_sheetPct + _fsPct) / 2) * 0.65)); }
+
+      var SHEET_CONCURRENCY = 10; // more chunks in flight at once to the web app
+      var sheetUploadPromise = (async function () {
+        function sendChunk(ch) {
+          return fetch(baseUrl, {
+            method: 'POST', mode: 'no-cors', redirect: 'follow',
+            body: JSON.stringify({ action: 'uploadData', sheet: cfg.sheet, csv: ch.csv, clear: ch.clear, startRow: ch.startRow })
+          });
+        }
+        var done = 0;
+        var toRun = chunks;
+        // Only a clear:true chunk (whole-sheet wipe) needs to land before
+        // the rest — that only happens on a brand-new sheet. A diff-based
+        // upload never sets clear, so every chunk targets a disjoint row
+        // range and can run in parallel from the start.
+        if (chunks.length && chunks[0].clear) {
+          await sendChunk(chunks[0]);
+          done++; _sheetPct = Math.round((done / chunks.length) * 100); _rptCombinedBar();
+          toRun = chunks.slice(1);
+        }
+        for (var s2 = 0; s2 < toRun.length; s2 += SHEET_CONCURRENCY) {
+          var batch = toRun.slice(s2, s2 + SHEET_CONCURRENCY);
+          await Promise.all(batch.map(function (ch) {
+            return sendChunk(ch).then(function () {
+              done++; _sheetPct = Math.round((done / chunks.length) * 100); _rptCombinedBar();
+            });
+          }));
+        }
+        await fetch(baseUrl, {
+          method: 'POST', mode: 'no-cors', redirect: 'follow',
+          body: JSON.stringify({ action: 'setLastUpdated', lastUpdated: new Date().toISOString(), uploadedBy: 'Settings upload' })
+        });
+        _sheetPct = 100; _rptCombinedBar();
+      })();
+
+      var firestoreSyncPromise = (async function () {
+        if (typeof _fbDb === 'undefined' || !_fbDb) { _fsPct = 100; _rptCombinedBar(); return null; }
+        try {
+          var fsPfx    = (key === 'order') ? FS_ORDER_PFX : FS_STATUS_PFX;
+          var fsField  = (key === 'order') ? 'orderChunks' : 'statusChunks';
+          var fsBField = (key === 'order') ? 'orderBytes'  : 'statusBytes';
+          var fsResult = await fsWrite(fsPfx, allRows.slice(1), function (pct) { _fsPct = pct; _rptCombinedBar(); });
+          var fsUpdate = {}; fsUpdate[fsField] = fsResult.count; fsUpdate[fsBField] = fsResult.bytes;
+          fsUpdate.uploadedBy = 'Settings upload';
+          fsUpdate.updatedAt  = Date.now();
+          await _fbDb.collection(FS_COL).doc(FS_META).set(fsUpdate, { merge: true });
+          _fsPct = 100; _rptCombinedBar();
+          return fsResult;
+        } catch (fsErr) {
+          console.warn('[Reports] Firestore sync failed:', fsErr);
+          _fsPct = 100; _rptCombinedBar();
+          return null;
+        }
+      })();
+
+      var _syncResults = await Promise.all([sheetUploadPromise, firestoreSyncPromise]);
+      var fsResult = _syncResults[1];
+
+      if (fsResult) {
+        await rptAppendUploadLog({
+          ts: Date.now(),
+          uploadedBy: 'Settings upload',
+          report: cfg.label,
+          rowsUploaded: newDataRows.length,
+          rowsTotal: mergedData.length,
+          sizeBytes: fsResult.bytes,
+          months: rptComputeMonthsPresent(newDataRows, key === 'order' ? 4 : 9).map(function (m) { return m.month; })
+        });
+      }
+      // Update local data regardless of whether Firestore is configured —
+      // this used to only run inside the Firestore success path, so a
+      // deployment without Firestore never picked up its own upload.
+      if (key === 'order') window.lgrOrderData  = [[]].concat(allRows.slice(1));
+      if (key === 'prog')  window.lgrStatusData = [[]].concat(allRows.slice(1));
+
+      rptSetBar(key, 100);
+      rptSetPillState(key, 'ok',
+        isFirstEverUpload
+          ? '✓ ' + mergedData.length.toLocaleString() + ' rows uploaded'
+          : '✓ ' + changedIdx.length.toLocaleString() + ' new/updated rows (' + mergedData.length.toLocaleString() + ' total)'
+      );
+      setTimeout(function () {
+        rptSetBar(key, 0);
+        rptSetPillState(key, '', 'ZIP of XLS/XLSX/CSV');
+      }, 3000);
+
+      if (typeof rptRefreshData === 'function') rptRefreshData();
+
+    } catch (err) {
+      console.error(err);
+      rptSetPillState(key, 'err', 'Failed: ' + err.message);
+      rptSetBar(key, 0);
+      setTimeout(function () { rptSetPillState(key, '', 'ZIP of XLS/XLSX/CSV'); }, 4000);
+    }
+  }
+
+  // ── Upload Log — months currently stored + history of past uploads ──
+  function rptComputeMonthsPresent(dataRows, dateColIdx) {
+    var counts = {};
+    for (var i = 0; i < dataRows.length; i++) {
+      var d = dataRows[i] ? dataRows[i][dateColIdx] : null;
+      if (!d) continue;
+      var dd = d instanceof Date ? d : new Date(d);
+      if (isNaN(dd.getTime())) continue;
+      var k = dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0');
+      counts[k] = (counts[k] || 0) + 1;
+    }
+    return Object.keys(counts).sort().map(function (k) { return { month: k, count: counts[k] }; });
+  }
+
+  function _rptMonthLabel(ym) {
+    var parts = ym.split('-');
+    var names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return names[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+  }
+
+  async function rptAppendUploadLog(entry) {
+    if (!_fbDb) return;
+    try {
+      var ref = _fbDb.collection(FS_COL).doc('upload_log');
+      var snap = await ref.get();
+      var entries = (snap.exists && Array.isArray(snap.data().entries)) ? snap.data().entries : [];
+      entries.push(entry);
+      if (entries.length > 30) entries = entries.slice(entries.length - 30);
+      await ref.set({ entries: entries }, { merge: true });
+    } catch (e) {
+      console.warn('[Reports] Failed to write upload log:', e);
+    }
+  }
+
+  function _rptFmtBytes(n) {
+    if (!n || n < 0) return '0 KB';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+
+  var FS_FREE_TIER_BYTES = 1024 * 1024 * 1024; // Firestore Spark (free) plan: 1 GiB stored data
+
+  async function rptRenderStorageUsage() {
+    var bar   = document.getElementById('rpt-uploadlog-storage-bar');
+    var pctEl = document.getElementById('rpt-uploadlog-storage-pct');
+    var lblEl = document.getElementById('rpt-uploadlog-storage-label');
+    if (!bar || !pctEl || !lblEl) return;
+    if (!_fbDb) { lblEl.textContent = 'Firestore not connected.'; return; }
+    lblEl.textContent = 'Calculating from stored data…';
+    try {
+      // Read the ACTUAL chunk documents rather than a running total in
+      // metadata — a running total only updates on new uploads, so data
+      // that was already in Firestore before this tracking existed would
+      // otherwise show as 0 even though it's really stored there.
+      var metaSnap = await _fbDb.collection(FS_COL).doc(FS_META).get();
+      var meta = metaSnap.exists ? metaSnap.data() : {};
+      var orderChunks  = meta.orderChunks  || 0;
+      var statusChunks = meta.statusChunks || 0;
+
+      var orderDocIds  = Array.from({ length: orderChunks },  function(_, i){ return FS_ORDER_PFX  + i; });
+      var statusDocIds = Array.from({ length: statusChunks }, function(_, i){ return FS_STATUS_PFX + i; });
+      var allDocs = await Promise.all(
+        orderDocIds.concat(statusDocIds).map(function(id){ return _fbDb.collection(FS_COL).doc(id).get(); })
+      );
+
+      var orderBytes = 0, statusBytes = 0;
+      allDocs.slice(0, orderChunks).forEach(function(s){ orderBytes += (s.exists && s.data().data) ? s.data().data.length : 0; });
+      allDocs.slice(orderChunks).forEach(function(s){ statusBytes += (s.exists && s.data().data) ? s.data().data.length : 0; });
+      var used = orderBytes + statusBytes;
+
+      // Keep metadata in sync so it reflects reality even before the next upload
+      _fbDb.collection(FS_COL).doc(FS_META).set({ orderBytes: orderBytes, statusBytes: statusBytes }, { merge: true }).catch(function(){});
+
+      var pct = Math.min((used / FS_FREE_TIER_BYTES) * 100, 100);
+      bar.style.width = pct.toFixed(1) + '%';
+      bar.style.background = pct >= 90 ? 'linear-gradient(90deg,#ef4444,#f87171)'
+                            : pct >= 70 ? 'linear-gradient(90deg,#f59e0b,#fbbf24)'
+                            : 'linear-gradient(90deg,#818cf8,#a855f7)';
+      pctEl.textContent = pct.toFixed(1) + '%';
+      lblEl.textContent = _rptFmtBytes(used) + ' of ' + _rptFmtBytes(FS_FREE_TIER_BYTES) + ' free-tier storage used (estimate — Firestore\'s own accounting adds a small per-document overhead on top of this).';
+    } catch (e) {
+      lblEl.textContent = 'Could not read storage usage.';
+    }
+  }
+
+  function rptRenderMonthsInStore() {
+    var el = document.getElementById('rpt-uploadlog-months');
+    if (!el) return;
+    var oData = (typeof lgrOrderData !== 'undefined' && lgrOrderData.length > 1) ? lgrOrderData.slice(1) : [];
+    var months = rptComputeMonthsPresent(oData, 4);
+    if (!months.length) {
+      el.innerHTML = '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text-secondary);">No data uploaded yet.</span>';
+      return;
+    }
+    el.innerHTML = months.map(function (m) {
+      return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);color:#4ade80;padding:5px 11px;border-radius:99px;font-family:\'DM Mono\',monospace;font-size:11px;font-weight:700;">' +
+        _rptMonthLabel(m.month) + '<span style="opacity:.65;font-weight:600;">· ' + m.count.toLocaleString() + '</span></span>';
+    }).join('');
+  }
+
+  async function rptRenderUploadHistory() {
+    var el = document.getElementById('rpt-uploadlog-list');
+    if (!el) return;
+    if (!_fbDb) { el.innerHTML = '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text-secondary);">Firestore not connected.</span>'; return; }
+    try {
+      var snap = await _fbDb.collection(FS_COL).doc('upload_log').get();
+      var entries = (snap.exists && Array.isArray(snap.data().entries)) ? snap.data().entries.slice().reverse() : [];
+      if (!entries.length) {
+        el.innerHTML = '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text-secondary);">No uploads logged yet.</span>';
+        return;
+      }
+      el.innerHTML = entries.map(function (e) {
+        var d = new Date(e.ts);
+        var when = isNaN(d.getTime()) ? '—' : d.toLocaleString();
+        var monthsLbl = (e.months || []).map(_rptMonthLabel).join(', ') || '—';
+        return '<div style="padding:11px 13px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.02);">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
+            '<span style="font-family:\'Raleway\',sans-serif;font-weight:700;font-size:12.5px;color:var(--text-primary);">' + (e.report || '—') + '</span>' +
+            '<span style="font-family:\'DM Mono\',monospace;font-size:10px;color:var(--text-secondary);">' + when + '</span>' +
+          '</div>' +
+          '<div style="font-family:\'DM Mono\',monospace;font-size:10.5px;color:var(--text-secondary);margin-top:5px;">' +
+            (e.rowsUploaded || 0).toLocaleString() + ' rows uploaded · ' + (e.rowsTotal || 0).toLocaleString() + ' total after merge' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:4px;">' +
+            '<span style="font-family:\'DM Mono\',monospace;font-size:10.5px;color:#818cf8;">Months: ' + monthsLbl + '</span>' +
+            '<span style="font-family:\'DM Mono\',monospace;font-size:10px;font-weight:700;color:#4ade80;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);padding:2px 8px;border-radius:99px;white-space:nowrap;">' + _rptFmtBytes(e.sizeBytes || 0) + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    } catch (e) {
+      el.innerHTML = '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text-secondary);">Could not load upload log.</span>';
+    }
+  }
+
+  function rptOpenUploadLog() {
+    var modal = document.getElementById('rpt-uploadlog-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    document.getElementById('rpt-uploadlog-storage-label').textContent = 'Loading…';
+    rptRenderStorageUsage();
+    rptRenderMonthsInStore();
+    document.getElementById('rpt-uploadlog-list').textContent = 'Loading…';
+    rptRenderUploadHistory();
+  }
+
+  function rptCloseUploadLog() {
+    var modal = document.getElementById('rpt-uploadlog-modal');
+    if (modal) modal.style.display = 'none';
+  }
+</script>
+</body>
+</html>
